@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useClientApiKey } from "@/lib/clientKey";
 import type {
   NewTicketInput,
   SupportTicket,
@@ -71,9 +70,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [apiKeysOpen, setApiKeysOpen] = useState(false);
 
-  const { apiKey, isLoaded: apiKeyLoaded, setApiKey, clearApiKey } =
-    useClientApiKey();
-
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
@@ -83,7 +79,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchTickets = useCallback(async () => {
-    if (!apiKey) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -91,7 +86,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
       const res = await fetch("/api/tickets", {
         cache: "no-store",
         signal: controller.signal,
-        headers: { "x-api-key": apiKey },
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as
@@ -111,23 +105,20 @@ export function Dashboard({ instanceName }: DashboardProps) {
         err instanceof Error ? err.message : "Failed to load tickets",
       );
     }
-  }, [apiKey]);
+  }, []);
 
   useEffect(() => {
-    const tickId = setInterval(() => setNow(new Date()), 1000);
-    if (!apiKey) {
-      return () => clearInterval(tickId);
-    }
     void fetchTickets();
     const pollId = setInterval(() => {
       void fetchTickets();
     }, POLL_INTERVAL_MS);
+    const tickId = setInterval(() => setNow(new Date()), 1000);
     return () => {
       clearInterval(pollId);
       clearInterval(tickId);
       abortRef.current?.abort();
     };
-  }, [fetchTickets, apiKey]);
+  }, [fetchTickets]);
 
   useEffect(() => {
     if (!toast) return;
@@ -224,18 +215,10 @@ export function Dashboard({ instanceName }: DashboardProps) {
     }) => {
       setActionBusy(true);
       setActionError(null);
-      if (!apiKey) {
-        setActionError("Configure an API key in the 🔑 panel first.");
-        setActionBusy(false);
-        return;
-      }
       try {
         const res = await fetch(params.url, {
           method: params.method,
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(params.body),
         });
         const body = (await res.json().catch(() => null)) as
@@ -284,7 +267,7 @@ export function Dashboard({ instanceName }: DashboardProps) {
         setActionBusy(false);
       }
     },
-    [appendActivity, fetchTickets, apiKey],
+    [appendActivity, fetchTickets],
   );
 
   const handleStatusSubmit = useCallback(
@@ -474,25 +457,7 @@ export function Dashboard({ instanceName }: DashboardProps) {
         />
       </section>
 
-      {apiKeyLoaded && !apiKey ? (
-        <div className="mt-6 rounded-md bg-amber-500/10 px-4 py-3 ring-1 ring-inset ring-amber-500/30">
-          <p className="text-sm font-semibold text-amber-200">
-            🔑 Configure an API key for this dashboard.
-          </p>
-          <p className="mt-1 text-xs text-amber-300/80">
-            Open the <button
-              type="button"
-              onClick={() => setApiKeysOpen(true)}
-              className="underline decoration-amber-400/60 underline-offset-2 hover:text-amber-100"
-            >
-              API Keys
-            </button> panel to generate one — or paste an existing key — and
-            save it as the active client key.
-          </p>
-        </div>
-      ) : null}
-
-      {apiKey && loadError ? (
+      {loadError ? (
         <div className="mt-6 rounded-md bg-rose-500/10 px-4 py-3 text-sm text-rose-300 ring-1 ring-inset ring-rose-500/30">
           Failed to load tickets: {loadError}
         </div>
@@ -517,11 +482,7 @@ export function Dashboard({ instanceName }: DashboardProps) {
       </section>
 
       <section className="mt-4">
-        {!apiKey ? (
-          <div className="rounded-xl bg-slate-900/40 px-4 py-12 text-center text-sm text-slate-500 ring-1 ring-slate-800">
-            Waiting for an API key — open the 🔑 panel to configure one.
-          </div>
-        ) : tickets === null && !loadError ? (
+        {tickets === null && !loadError ? (
           <div className="rounded-xl bg-slate-900/40 px-4 py-12 text-center text-sm text-slate-500 ring-1 ring-slate-800">
             Loading tickets…
           </div>
@@ -602,9 +563,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
       <ApiKeyManager
         open={apiKeysOpen}
         onClose={() => setApiKeysOpen(false)}
-        currentKey={apiKey}
-        onKeySet={setApiKey}
-        onKeyCleared={clearApiKey}
       />
     </main>
   );
