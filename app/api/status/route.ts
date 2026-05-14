@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { errorResponse } from "@/lib/api-helpers";
+import { CORS_HEADERS, errorResponse, optionsResponse } from "@/lib/api-helpers";
+import { authenticate } from "@/lib/authenticate";
 import {
   StoreError,
   criticalOpenCount,
@@ -10,7 +11,9 @@ import type { StatusResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authError = await authenticate(request);
+  if (authError) return authError;
   try {
     const [count, open, criticalOpen] = await Promise.all([
       ticketCount(),
@@ -26,7 +29,7 @@ export async function GET() {
       health: criticalOpen > 0 ? "degraded" : "ok",
       timestamp: new Date().toISOString(),
     };
-    return NextResponse.json(payload);
+    return NextResponse.json(payload, { headers: CORS_HEADERS });
   } catch (e) {
     if (e instanceof StoreError) {
       return errorResponse(500, e.message || "Status check failed");
@@ -37,3 +40,5 @@ export async function GET() {
     );
   }
 }
+
+export const OPTIONS = optionsResponse;

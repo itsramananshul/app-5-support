@@ -13,18 +13,37 @@ import {
   type TicketStatus,
 } from "./types";
 
+export const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "x-api-key, content-type",
+} as const;
+
+export function optionsResponse() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "x-api-key, content-type",
+    },
+  });
+}
+
 export function errorResponse(status: number, message: string) {
   return NextResponse.json<ApiErrorBody>(
     { success: false, error: message },
-    { status },
+    { status, headers: CORS_HEADERS },
   );
 }
 
 export function mutationSuccessResponse(ticket: SupportTicket) {
-  return NextResponse.json<MutationSuccessBody>({
-    success: true,
-    ticket,
-  });
+  return NextResponse.json<MutationSuccessBody>(
+    {
+      success: true,
+      ticket,
+    },
+    { headers: CORS_HEADERS },
+  );
 }
 
 export function mapStoreError(e: StoreError) {

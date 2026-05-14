@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { authenticate } from "@/lib/authenticate";
 import {
+  CORS_HEADERS,
   errorResponse,
+  optionsResponse,
   parseNewTicket,
   readJsonBody,
   runMutation,
@@ -15,7 +17,7 @@ export async function GET(request: Request) {
   if (authError) return authError;
   try {
     const tickets = await listTickets();
-    return NextResponse.json(tickets);
+    return NextResponse.json(tickets, { headers: CORS_HEADERS });
   } catch (e) {
     if (e instanceof StoreError) {
       return errorResponse(500, e.message || "Failed to load tickets");
@@ -36,3 +38,5 @@ export async function POST(request: Request) {
   if (!parsed.ok) return errorResponse(parsed.status, parsed.message);
   return runMutation(() => createTicket(parsed.value));
 }
+
+export const OPTIONS = optionsResponse;

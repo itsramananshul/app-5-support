@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticate } from "@/lib/authenticate";
-import { errorResponse } from "@/lib/api-helpers";
+import { CORS_HEADERS, errorResponse, optionsResponse } from "@/lib/api-helpers";
 import { StoreError, getTicket } from "@/lib/tickets-store";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ export async function GET(
   try {
     const ticket = await getTicket(params.id);
     if (!ticket) return errorResponse(404, "Ticket not found");
-    return NextResponse.json(ticket);
+    return NextResponse.json(ticket, { headers: CORS_HEADERS });
   } catch (e) {
     if (e instanceof StoreError) {
       return errorResponse(500, e.message || "Failed to load ticket");
@@ -25,3 +25,5 @@ export async function GET(
     );
   }
 }
+
+export const OPTIONS = optionsResponse;
