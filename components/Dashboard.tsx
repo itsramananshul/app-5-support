@@ -12,6 +12,7 @@ import {
   type ActivityAction,
   type ActivityEntry,
 } from "./ActivityFeed";
+import { ApiKeyManager } from "./ApiKeyManager";
 import { AssignModal } from "./AssignModal";
 import { ConnectionStatus, type ConnectionState } from "./ConnectionStatus";
 import {
@@ -67,6 +68,7 @@ export function Dashboard({ instanceName }: DashboardProps) {
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [apiKeysOpen, setApiKeysOpen] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("ALL");
@@ -391,6 +393,13 @@ export function Dashboard({ instanceName }: DashboardProps) {
             <ConnectionStatus state={connectionState} />
             <button
               type="button"
+              onClick={() => setApiKeysOpen(true)}
+              className="inline-flex items-center gap-1 rounded-full bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+            >
+              <span aria-hidden>🔑</span> API Keys
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setActionError(null);
                 setActionModal({ kind: "new" });
@@ -550,6 +559,11 @@ export function Dashboard({ instanceName }: DashboardProps) {
       />
 
       <Toast toast={toast} onClose={() => setToast(null)} />
+
+      <ApiKeyManager
+        open={apiKeysOpen}
+        onClose={() => setApiKeysOpen(false)}
+      />
     </main>
   );
 }

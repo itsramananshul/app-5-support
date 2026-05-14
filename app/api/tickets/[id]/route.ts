@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
+import { authenticate } from "@/lib/authenticate";
 import { errorResponse } from "@/lib/api-helpers";
 import { StoreError, getTicket } from "@/lib/tickets-store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { id: string } },
 ) {
+  const authError = await authenticate(request);
+  if (authError) return authError;
   try {
     const ticket = await getTicket(params.id);
     if (!ticket) return errorResponse(404, "Ticket not found");
