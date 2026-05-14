@@ -1,18 +1,46 @@
+"use client";
+
 import type { TicketSeverity } from "@/lib/types";
 
 const styles: Record<TicketSeverity, string> = {
-  LOW: "bg-blue-500/15 text-blue-300 ring-blue-500/30",
-  MEDIUM: "bg-slate-500/15 text-slate-300 ring-slate-500/30",
-  HIGH: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
-  CRITICAL: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
+  LOW: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+  MEDIUM: "bg-amber-50 text-amber-700 ring-amber-600/20",
+  HIGH: "bg-orange-50 text-orange-700 ring-orange-600/20",
+  CRITICAL: "bg-rose-50 text-rose-700 ring-rose-600/20",
 };
 
-export function SeverityBadge({ severity }: { severity: TicketSeverity }) {
+const labels: Record<TicketSeverity, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  CRITICAL: "Critical",
+};
+
+interface SeverityBadgeProps {
+  severity: TicketSeverity;
+  onClick?: () => void;
+  title?: string;
+}
+
+export function SeverityBadge({ severity, onClick, title }: SeverityBadgeProps) {
+  const base = `inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${styles[severity]}`;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${base} cursor-pointer transition-shadow hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400`}
+        title={title ?? "Click to start work"}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+        {labels[severity]}
+      </button>
+    );
+  }
   return (
-    <span
-      className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${styles[severity]}`}
-    >
-      {severity}
+    <span className={base}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+      {labels[severity]}
     </span>
   );
 }

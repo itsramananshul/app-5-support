@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  NewTicketInput,
   SupportTicket,
   TicketSeverity,
   TicketStatus,
@@ -13,68 +12,80 @@ import {
   type ActivityEntry,
 } from "./ActivityFeed";
 import { ApiKeyManager } from "./ApiKeyManager";
-import { AssignModal } from "./AssignModal";
-import { ConnectionStatus, type ConnectionState } from "./ConnectionStatus";
-import {
-  FilterBar,
-  type CategoryFilter,
-  type SeverityFilter,
-  type StatusFilter,
-} from "./FilterBar";
-import { NewTicketModal } from "./NewTicketModal";
-import { SeverityModal } from "./SeverityModal";
-import { StatCard } from "./StatCard";
-import { StatusModal } from "./StatusModal";
-import { TicketsTable, type TicketActionKind } from "./TicketsTable";
+import { ComingSoon } from "./ComingSoon";
+import { CriticalTickets } from "./CriticalTickets";
+import { DonutChart } from "./DonutChart";
+import { FilterDropdown, type SeverityFilter } from "./FilterDropdown";
+import { MetricCard } from "./MetricCard";
+import { NewTicketModal, type NewTicketModalInput } from "./NewTicketModal";
+import { RecentTickets } from "./RecentTickets";
 import { Toast, type ToastState } from "./Toast";
+import { TopNav, type NavView } from "./TopNav";
 
 interface DashboardProps {
   instanceName: string;
 }
 
 const POLL_INTERVAL_MS = 5000;
-const STALE_THRESHOLD_MS = 15000;
 const ACTIVITY_MAX = 50;
 
-type ActionModal =
-  | { kind: "status"; ticket: SupportTicket }
-  | { kind: "severity"; ticket: SupportTicket }
-  | { kind: "assign"; ticket: SupportTicket }
-  | { kind: "new" }
-  | null;
+const COMING_SOON_COPY: Record<
+  Exclude<NavView, "dashboard">,
+  { title: string; description: string }
+> = {
+  tickets: {
+    title: "Tickets — coming soon",
+    description:
+      "Dedicated ticket queue with full filtering, bulk actions, and SLA tracking.",
+  },
+  customers: {
+    title: "Customers — coming soon",
+    description:
+      "Customer accounts, contact history, and per-account ticket trends.",
+  },
+  "knowledge-base": {
+    title: "Knowledge Base — coming soon",
+    description:
+      "Searchable articles, runbooks, and resolution templates for common issues.",
+  },
+  reports: {
+    title: "Reports — coming soon",
+    description:
+      "Time-to-resolution, severity distributions, and team performance dashboards.",
+  },
+};
 
-function todayLocalISO(now: Date): string {
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+function nextSeverityValue(s: TicketSeverity): TicketSeverity | null {
+  if (s === "LOW") return "MEDIUM";
+  if (s === "MEDIUM") return "HIGH";
+  if (s === "HIGH") return "CRITICAL";
+  return null;
 }
 
 function newActivityId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function scrollToRecent() {
+  const el = document.getElementById("recent-tickets");
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 export function Dashboard({ instanceName }: DashboardProps) {
   const [tickets, setTickets] = useState<SupportTicket[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [actionModal, setActionModal] = useState<ActionModal>(null);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [view, setView] = useState<NavView>("dashboard");
+  const [filter, setFilter] = useState<SeverityFilter>("ALL");
+  const [expanded, setExpanded] = useState(false);
 
-  const [lastSuccessAt, setLastSuccessAt] = useState<Date | null>(null);
-  const [lastFetchOk, setLastFetchOk] = useState<boolean>(true);
-  const [now, setNow] = useState<Date>(new Date());
+  const [newTicketOpen, setNewTicketOpen] = useState(false);
+  const [newTicketBusy, setNewTicketBusy] = useState(false);
+  const [newTicketError, setNewTicketError] = useState<string | null>(null);
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [apiKeysOpen, setApiKeysOpen] = useState(false);
-
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("ALL");
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
-  const [search, setSearch] = useState<string>("");
-  const [criticalOnly, setCriticalOnly] = useState<boolean>(false);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -96,11 +107,8 @@ export function Dashboard({ instanceName }: DashboardProps) {
       const data: SupportTicket[] = await res.json();
       setTickets(data);
       setLoadError(null);
-      setLastFetchOk(true);
-      setLastSuccessAt(new Date());
     } catch (err) {
       if ((err as { name?: string }).name === "AbortError") return;
-      setLastFetchOk(false);
       setLoadError(
         err instanceof Error ? err.message : "Failed to load tickets",
       );
@@ -109,13 +117,11 @@ export function Dashboard({ instanceName }: DashboardProps) {
 
   useEffect(() => {
     void fetchTickets();
-    const pollId = setInterval(() => {
+    const id = setInterval(() => {
       void fetchTickets();
     }, POLL_INTERVAL_MS);
-    const tickId = setInterval(() => setNow(new Date()), 1000);
     return () => {
-      clearInterval(pollId);
-      clearInterval(tickId);
+      clearInterval(id);
       abortRef.current?.abort();
     };
   }, [fetchTickets]);
@@ -126,436 +132,381 @@ export function Dashboard({ instanceName }: DashboardProps) {
     return () => clearTimeout(id);
   }, [toast]);
 
-  const connectionState: ConnectionState = useMemo(() => {
-    if (!lastSuccessAt) return "connecting";
-    const age = now.getTime() - lastSuccessAt.getTime();
-    if (age > STALE_THRESHOLD_MS) return "stale";
-    if (!lastFetchOk) return "reconnecting";
-    return "live";
-  }, [lastSuccessAt, lastFetchOk, now]);
-
-  const today = useMemo(() => todayLocalISO(now), [now]);
-
   const stats = useMemo(() => {
     const list = tickets ?? [];
     const total = list.length;
     const open = list.filter((t) => t.status === "OPEN").length;
-    const criticalOpen = list.filter(
-      (t) => t.status === "OPEN" && t.severity === "CRITICAL",
-    ).length;
-    const resolvedToday = list.filter(
-      (t) => t.resolved_at !== null && t.resolved_at.slice(0, 10) === today,
-    ).length;
-    return { total, open, criticalOpen, resolvedToday };
-  }, [tickets, today]);
+    const inProgress = list.filter((t) => t.status === "IN_PROGRESS").length;
+    const resolved = list.filter((t) => t.status === "RESOLVED").length;
+    const closed = list.filter((t) => t.status === "CLOSED").length;
 
-  const filtered = useMemo(() => {
-    const list = tickets ?? [];
-    const term = search.trim().toLowerCase();
-    return list.filter((t) => {
-      if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
-      if (severityFilter !== "ALL" && t.severity !== severityFilter)
-        return false;
-      if (categoryFilter !== "ALL" && t.category !== categoryFilter)
-        return false;
-      if (criticalOnly && t.severity !== "CRITICAL") return false;
-      if (term) {
-        const hay =
-          `${t.ticket_number} ${t.title} ${t.assigned_to}`.toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
-      return true;
-    });
-  }, [
-    tickets,
-    statusFilter,
-    severityFilter,
-    categoryFilter,
-    search,
-    criticalOnly,
-  ]);
+    const low = list.filter((t) => t.severity === "LOW").length;
+    const medium = list.filter((t) => t.severity === "MEDIUM").length;
+    const high = list.filter((t) => t.severity === "HIGH").length;
+    const critical = list.filter((t) => t.severity === "CRITICAL").length;
+
+    return {
+      total,
+      open,
+      inProgress,
+      resolved,
+      closed,
+      low,
+      medium,
+      high,
+      critical,
+    };
+  }, [tickets]);
+
+  const filterCounts: Record<SeverityFilter, number> = useMemo(
+    () => ({
+      ALL: stats.total,
+      LOW: stats.low,
+      MEDIUM: stats.medium,
+      HIGH: stats.high,
+      CRITICAL: stats.critical,
+    }),
+    [stats],
+  );
 
   const appendActivity = useCallback((entry: ActivityEntry) => {
     setActivity((prev) => [entry, ...prev].slice(0, ACTIVITY_MAX));
   }, []);
 
-  const handleAction = useCallback(
-    (ticket: SupportTicket, action: TicketActionKind) => {
-      setActionError(null);
-      setActionModal({ kind: action, ticket });
-    },
-    [],
-  );
-
-  const handleCloseModal = useCallback(() => {
-    if (actionBusy) return;
-    setActionModal(null);
-    setActionError(null);
-  }, [actionBusy]);
-
-  const handleResetFilters = useCallback(() => {
-    setStatusFilter("ALL");
-    setSeverityFilter("ALL");
-    setCategoryFilter("ALL");
-    setSearch("");
-    setCriticalOnly(false);
+  const pushToast = useCallback((kind: ToastState["kind"], message: string) => {
+    setToast({ id: Date.now(), kind, message });
   }, []);
 
-  const submitMutation = useCallback(
-    async (params: {
-      url: string;
-      method: "POST" | "PATCH";
-      body: unknown;
+  const recordActivity = useCallback(
+    (params: {
       action: ActivityAction;
-      ticketNumber: string;
-      title: string;
+      ticket: SupportTicket | { ticket_number: string; title: string };
       detail: string;
-      successMessage: string;
-      failurePrefix: string;
+      result: "success" | "failure";
+      message?: string;
     }) => {
-      setActionBusy(true);
-      setActionError(null);
+      appendActivity({
+        id: newActivityId(),
+        timestamp: new Date(),
+        action: params.action,
+        ticketNumber: params.ticket.ticket_number,
+        title: params.ticket.title,
+        detail: params.detail,
+        result: params.result,
+        message: params.message,
+      });
+    },
+    [appendActivity],
+  );
+
+  const patchStatus = useCallback(
+    async (ticket: SupportTicket, nextStatus: TicketStatus): Promise<void> => {
+      const body: { status: TicketStatus; resolution?: string } = {
+        status: nextStatus,
+      };
+      if (nextStatus === "RESOLVED" || nextStatus === "CLOSED") {
+        const existing = ticket.resolution?.trim();
+        body.resolution =
+          existing && existing.length > 0
+            ? existing
+            : `Auto-resolved via dashboard at ${new Date().toLocaleString()}`;
+      }
       try {
-        const res = await fetch(params.url, {
-          method: params.method,
+        const res = await fetch(`/api/tickets/${ticket.id}/status`, {
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(params.body),
+          body: JSON.stringify(body),
         });
-        const body = (await res.json().catch(() => null)) as
+        const data = (await res.json().catch(() => null)) as
           | { success?: boolean; error?: string; ticket?: SupportTicket }
           | null;
-        const ok = res.ok && body?.success === true;
-        if (!ok) {
-          throw new Error(body?.error ?? `Request failed (HTTP ${res.status})`);
+        if (!res.ok || data?.success !== true) {
+          throw new Error(data?.error ?? `Request failed (HTTP ${res.status})`);
         }
-
-        appendActivity({
-          id: newActivityId(),
-          timestamp: new Date(),
-          action: params.action,
-          ticketNumber: params.ticketNumber,
-          title: params.title,
-          detail: params.detail,
+        recordActivity({
+          action: "status_change",
+          ticket,
+          detail: `${ticket.status} → ${nextStatus}`,
           result: "success",
         });
-        setToast({
-          id: Date.now(),
-          kind: "success",
-          message: params.successMessage,
-        });
-        setActionModal(null);
+        pushToast(
+          "success",
+          `${ticket.ticket_number} → ${nextStatus.replace(/_/g, " ")}`,
+        );
         void fetchTickets();
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Action failed";
-        appendActivity({
-          id: newActivityId(),
-          timestamp: new Date(),
-          action: params.action,
-          ticketNumber: params.ticketNumber,
-          title: params.title,
-          detail: params.detail,
+        const message = err instanceof Error ? err.message : "Status change failed";
+        recordActivity({
+          action: "status_change",
+          ticket,
+          detail: `${ticket.status} → ${nextStatus}`,
           result: "failure",
           message,
         });
-        setActionError(message);
-        setToast({
-          id: Date.now(),
-          kind: "error",
-          message: `${params.failurePrefix}: ${message}`,
-        });
-      } finally {
-        setActionBusy(false);
+        pushToast("error", `Status change failed: ${message}`);
       }
     },
-    [appendActivity, fetchTickets],
+    [fetchTickets, pushToast, recordActivity],
   );
 
-  const handleStatusSubmit = useCallback(
-    (newStatus: TicketStatus, resolution?: string) => {
-      if (actionModal?.kind !== "status") return;
-      const t = actionModal.ticket;
-      const body: { status: TicketStatus; resolution?: string } = {
-        status: newStatus,
-      };
-      if (resolution !== undefined) body.resolution = resolution;
-      void submitMutation({
-        url: `/api/tickets/${t.id}/status`,
-        method: "PATCH",
-        body,
-        action: "status_change",
-        ticketNumber: t.ticket_number,
-        title: t.title,
-        detail: `${t.status} → ${newStatus}`,
-        successMessage: `${t.ticket_number} → ${newStatus.replace(/_/g, " ")}`,
-        failurePrefix: "Status change failed",
-      });
+  const escalateSeverity = useCallback(
+    async (ticket: SupportTicket): Promise<void> => {
+      const next = nextSeverityValue(ticket.severity);
+      if (!next) {
+        pushToast("error", `${ticket.ticket_number} is already CRITICAL`);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/tickets/${ticket.id}/severity`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ severity: next }),
+        });
+        const data = (await res.json().catch(() => null)) as
+          | { success?: boolean; error?: string; ticket?: SupportTicket }
+          | null;
+        if (!res.ok || data?.success !== true) {
+          throw new Error(data?.error ?? `Request failed (HTTP ${res.status})`);
+        }
+        recordActivity({
+          action: "severity_change",
+          ticket,
+          detail: `${ticket.severity} → ${next}`,
+          result: "success",
+        });
+        pushToast(
+          "success",
+          `${ticket.ticket_number} severity → ${next}`,
+        );
+        void fetchTickets();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Severity change failed";
+        recordActivity({
+          action: "severity_change",
+          ticket,
+          detail: `${ticket.severity} → ${next}`,
+          result: "failure",
+          message,
+        });
+        pushToast("error", `Escalate failed: ${message}`);
+      }
     },
-    [actionModal, submitMutation],
+    [fetchTickets, pushToast, recordActivity],
   );
 
-  const handleSeveritySubmit = useCallback(
-    (newSeverity: TicketSeverity) => {
-      if (actionModal?.kind !== "severity") return;
-      const t = actionModal.ticket;
-      void submitMutation({
-        url: `/api/tickets/${t.id}/severity`,
-        method: "PATCH",
-        body: { severity: newSeverity },
-        action: "severity_change",
-        ticketNumber: t.ticket_number,
-        title: t.title,
-        detail: `${t.severity} → ${newSeverity}`,
-        successMessage: `${t.ticket_number} severity → ${newSeverity}`,
-        failurePrefix: "Severity change failed",
-      });
+  const createTicket = useCallback(
+    async (input: NewTicketModalInput): Promise<void> => {
+      setNewTicketBusy(true);
+      setNewTicketError(null);
+      try {
+        const res = await fetch("/api/tickets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const data = (await res.json().catch(() => null)) as
+          | { success?: boolean; error?: string; ticket?: SupportTicket }
+          | null;
+        if (!res.ok || data?.success !== true) {
+          throw new Error(data?.error ?? `Request failed (HTTP ${res.status})`);
+        }
+        recordActivity({
+          action: "created",
+          ticket: { ticket_number: input.ticket_number, title: input.title },
+          detail: `${input.category} · ${input.severity}`,
+          result: "success",
+        });
+        pushToast("success", `Created ticket ${input.ticket_number}`);
+        setNewTicketOpen(false);
+        void fetchTickets();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Create failed";
+        recordActivity({
+          action: "created",
+          ticket: { ticket_number: input.ticket_number, title: input.title },
+          detail: `${input.category} · ${input.severity}`,
+          result: "failure",
+          message,
+        });
+        setNewTicketError(message);
+        pushToast("error", `Create failed: ${message}`);
+      } finally {
+        setNewTicketBusy(false);
+      }
     },
-    [actionModal, submitMutation],
+    [fetchTickets, pushToast, recordActivity],
   );
 
-  const handleAssignSubmit = useCallback(
-    (assignedTo: string) => {
-      if (actionModal?.kind !== "assign") return;
-      const t = actionModal.ticket;
-      void submitMutation({
-        url: `/api/tickets/${t.id}/assign`,
-        method: "PATCH",
-        body: { assignedTo },
-        action: "assign",
-        ticketNumber: t.ticket_number,
-        title: t.title,
-        detail: `${t.assigned_to} → ${assignedTo}`,
-        successMessage: `${t.ticket_number} assigned to ${assignedTo}`,
-        failurePrefix: "Assign failed",
-      });
-    },
-    [actionModal, submitMutation],
-  );
-
-  const handleNewTicketSubmit = useCallback(
-    (input: NewTicketInput) => {
-      void submitMutation({
-        url: "/api/tickets",
-        method: "POST",
-        body: input,
-        action: "create",
-        ticketNumber: input.ticket_number,
-        title: input.title,
-        detail: `${input.category} · ${input.severity}`,
-        successMessage: `Created ticket ${input.ticket_number}`,
-        failurePrefix: "Create failed",
-      });
-    },
-    [submitMutation],
-  );
-
-  const lastRefreshedAgo = useMemo(() => {
-    if (!lastSuccessAt) return null;
-    return Math.max(
-      0,
-      Math.floor((now.getTime() - lastSuccessAt.getTime()) / 1000),
-    );
-  }, [lastSuccessAt, now]);
+  const handleViewRecent = useCallback(() => {
+    setExpanded(true);
+    setTimeout(scrollToRecent, 50);
+  }, []);
 
   return (
-    <main className="mx-auto max-w-[1400px] px-6 py-8">
-      <header className="flex flex-col gap-4 border-b border-slate-800 pb-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-400">
-              Support Tickets
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold text-slate-50">
-              {instanceName}{" "}
-              <span className="text-slate-500">— Support Tickets</span>
-            </h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Standalone tickets instance. Auto-refreshes every 5 seconds.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex items-center gap-2 rounded-full bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-300 ring-1 ring-inset ring-slate-700"
-              title="Set via INSTANCE_NAME env var. Read-only in the UI."
-            >
-              <svg
-                aria-hidden
-                viewBox="0 0 24 24"
-                className="h-3.5 w-3.5 text-slate-500"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <rect x="5" y="11" width="14" height="10" rx="2" />
-                <path d="M8 11V8a4 4 0 1 1 8 0v3" />
-              </svg>
-              Current Instance: {instanceName}
-            </span>
-            <ConnectionStatus state={connectionState} />
-            <button
-              type="button"
-              onClick={() => setApiKeysOpen(true)}
-              className="inline-flex items-center gap-1 rounded-full bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-            >
-              <span aria-hidden>🔑</span> API Keys
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActionError(null);
-                setActionModal({ kind: "new" });
-              }}
-              className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-            >
-              + New ticket
-            </button>
-          </div>
-        </div>
+    <div>
+      <TopNav
+        instanceName={instanceName}
+        currentView={view}
+        onChangeView={(v) => {
+          setView(v);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+        onOpenApiKeys={() => setApiKeysOpen(true)}
+      />
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-          <span>
-            <span className="text-slate-500">Last refreshed:</span>{" "}
-            <span className="text-slate-300 tabular-nums">
-              {lastSuccessAt ? lastSuccessAt.toLocaleTimeString() : "—"}
-            </span>
-            {lastRefreshedAgo !== null ? (
-              <span className="ml-1 text-slate-500">
-                ({lastRefreshedAgo}s ago)
-              </span>
-            ) : null}
-          </span>
-          <span className="text-slate-700">·</span>
-          <span>
-            Polling every {Math.round(POLL_INTERVAL_MS / 1000)} s · stale after{" "}
-            {Math.round(STALE_THRESHOLD_MS / 1000)} s
-          </span>
-        </div>
-      </header>
-
-      <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Tickets" value={stats.total} />
-        <StatCard
-          label="Open Tickets"
-          value={stats.open}
-          tone={stats.open > 0 ? "warning" : "default"}
-          hint={stats.open > 0 ? "Awaiting triage or work" : "All addressed"}
-        />
-        <StatCard
-          label="Critical Open"
-          value={stats.criticalOpen}
-          tone={stats.criticalOpen > 0 ? "danger" : "default"}
-          hint={
-            stats.criticalOpen > 0
-              ? "Health is degraded while > 0"
-              : "Nothing critical pending"
-          }
-        />
-        <StatCard
-          label="Resolved Today"
-          value={stats.resolvedToday}
-          tone="success"
-          hint={`resolved_at = ${today}`}
-        />
-      </section>
-
-      {loadError ? (
-        <div className="mt-6 rounded-md bg-rose-500/10 px-4 py-3 text-sm text-rose-300 ring-1 ring-inset ring-rose-500/30">
-          Failed to load tickets: {loadError}
-        </div>
-      ) : null}
-
-      <section className="mt-6">
-        <FilterBar
-          statusFilter={statusFilter}
-          severityFilter={severityFilter}
-          categoryFilter={categoryFilter}
-          search={search}
-          criticalOnly={criticalOnly}
-          onStatusChange={setStatusFilter}
-          onSeverityChange={setSeverityFilter}
-          onCategoryChange={setCategoryFilter}
-          onSearchChange={setSearch}
-          onCriticalChange={setCriticalOnly}
-          resultCount={filtered.length}
-          totalCount={tickets?.length ?? 0}
-          onReset={handleResetFilters}
-        />
-      </section>
-
-      <section className="mt-4">
-        {tickets === null && !loadError ? (
-          <div className="rounded-xl bg-slate-900/40 px-4 py-12 text-center text-sm text-slate-500 ring-1 ring-slate-800">
-            Loading tickets…
-          </div>
+      <main className="mx-auto max-w-7xl px-6 py-6">
+        {view !== "dashboard" ? (
+          <>
+            <div className="mb-6 flex flex-col gap-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                {view.replace("-", " ")}
+              </p>
+              <h1 className="text-2xl font-bold capitalize text-gray-900">
+                {view.replace("-", " ")}
+              </h1>
+            </div>
+            <ComingSoon
+              title={COMING_SOON_COPY[view].title}
+              description={COMING_SOON_COPY[view].description}
+              onBack={() => setView("dashboard")}
+            />
+          </>
         ) : (
-          <TicketsTable tickets={filtered} onAction={handleAction} />
+          <>
+            <div className="mb-6 flex items-end justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Overview
+                </p>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  {instanceName} Dashboard
+                </h1>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewTicketError(null);
+                    setNewTicketOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg bg-teal-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  New Ticket
+                </button>
+                <FilterDropdown
+                  value={filter}
+                  counts={filterCounts}
+                  onChange={setFilter}
+                />
+              </div>
+            </div>
+
+            {loadError ? (
+              <div className="mb-6 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-inset ring-rose-200">
+                Failed to load tickets: {loadError}
+              </div>
+            ) : null}
+
+            <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                label="Total Tickets"
+                value={stats.total}
+                onViewDetail={handleViewRecent}
+              />
+              <MetricCard
+                label="Open"
+                value={stats.open}
+                hint={stats.open > 0 ? "Awaiting triage" : "All addressed"}
+                onViewDetail={handleViewRecent}
+              />
+              <MetricCard
+                label="In Progress"
+                value={stats.inProgress}
+                hint={stats.inProgress > 0 ? "Being worked" : "Idle"}
+                onViewDetail={handleViewRecent}
+              />
+              <MetricCard
+                label="Resolved"
+                value={stats.resolved}
+                hint={stats.resolved > 0 ? "Awaiting close" : "—"}
+                onViewDetail={handleViewRecent}
+              />
+            </section>
+
+            <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-5">
+              <div className="lg:col-span-3">
+                <RecentTickets
+                  tickets={tickets ?? []}
+                  loading={tickets === null}
+                  filter={filter}
+                  expanded={expanded}
+                  onTransitionStatus={patchStatus}
+                  onEscalate={escalateSeverity}
+                  onToggleExpand={() => setExpanded((v) => !v)}
+                />
+              </div>
+              <div className="flex flex-col gap-4 lg:col-span-2">
+                <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+                  <header className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                        Distribution
+                      </p>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Severity Breakdown
+                      </h2>
+                    </div>
+                  </header>
+                  <DonutChart
+                    total={stats.total}
+                    centerLabel="Tickets"
+                    slices={[
+                      { label: "Low", value: stats.low, hex: "#10b981" },
+                      { label: "Medium", value: stats.medium, hex: "#f59e0b" },
+                      { label: "High", value: stats.high, hex: "#f97316" },
+                      { label: "Critical", value: stats.critical, hex: "#ef4444" },
+                    ].filter((s) => s.value > 0)}
+                  />
+                </section>
+                <ActivityFeed entries={activity} />
+              </div>
+            </section>
+
+            <section className="mb-6">
+              <CriticalTickets
+                tickets={tickets ?? []}
+                onTransitionStatus={patchStatus}
+                onViewAll={handleViewRecent}
+              />
+            </section>
+          </>
         )}
-      </section>
-
-      <section className="mt-6">
-        <ActivityFeed entries={activity} />
-      </section>
-
-      <StatusModal
-        open={actionModal?.kind === "status"}
-        ticketNumber={
-          actionModal?.kind === "status"
-            ? actionModal.ticket.ticket_number
-            : ""
-        }
-        currentStatus={
-          actionModal?.kind === "status" ? actionModal.ticket.status : "OPEN"
-        }
-        currentResolution={
-          actionModal?.kind === "status" ? actionModal.ticket.resolution : ""
-        }
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleStatusSubmit}
-      />
-
-      <SeverityModal
-        open={actionModal?.kind === "severity"}
-        ticketNumber={
-          actionModal?.kind === "severity"
-            ? actionModal.ticket.ticket_number
-            : ""
-        }
-        currentSeverity={
-          actionModal?.kind === "severity"
-            ? actionModal.ticket.severity
-            : "MEDIUM"
-        }
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleSeveritySubmit}
-      />
-
-      <AssignModal
-        open={actionModal?.kind === "assign"}
-        ticketNumber={
-          actionModal?.kind === "assign"
-            ? actionModal.ticket.ticket_number
-            : ""
-        }
-        currentAssignedTo={
-          actionModal?.kind === "assign"
-            ? actionModal.ticket.assigned_to
-            : "Unassigned"
-        }
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleAssignSubmit}
-      />
+      </main>
 
       <NewTicketModal
-        open={actionModal?.kind === "new"}
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleNewTicketSubmit}
+        open={newTicketOpen}
+        busy={newTicketBusy}
+        errorMessage={newTicketError}
+        onCancel={() => {
+          if (newTicketBusy) return;
+          setNewTicketOpen(false);
+          setNewTicketError(null);
+        }}
+        onSubmit={createTicket}
       />
 
       <Toast toast={toast} onClose={() => setToast(null)} />
@@ -564,6 +515,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
         open={apiKeysOpen}
         onClose={() => setApiKeysOpen(false)}
       />
-    </main>
+    </div>
   );
 }

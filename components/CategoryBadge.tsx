@@ -1,19 +1,23 @@
+"use client";
+
 import type { TicketCategory } from "@/lib/types";
 
-const styles: Record<TicketCategory, string> = {
-  EQUIPMENT: "bg-orange-500/15 text-orange-300 ring-orange-500/30",
-  IT: "bg-purple-500/15 text-purple-300 ring-purple-500/30",
-  SAFETY: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
-  QUALITY: "bg-teal-500/15 text-teal-300 ring-teal-500/30",
-  GENERAL: "bg-slate-500/15 text-slate-300 ring-slate-500/30",
+const labels: Record<TicketCategory, string> = {
+  EQUIPMENT: "Equipment",
+  IT: "IT",
+  SAFETY: "Safety",
+  QUALITY: "Quality",
+  GENERAL: "General",
 };
 
-export function CategoryBadge({ category }: { category: TicketCategory }) {
+interface CategoryBadgeProps {
+  category: TicketCategory;
+}
+
+export function CategoryBadge({ category }: CategoryBadgeProps) {
   return (
-    <span
-      className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${styles[category]}`}
-    >
-      {category}
+    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+      {labels[category]}
     </span>
   );
 }
