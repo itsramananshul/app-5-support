@@ -15,13 +15,13 @@ import {
 import type { NewTicketInput, TicketSeverity, TicketStatus } from "@/lib/types";
 
 function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
+  return NextResponse.json({ error: message }, { status });
 }
 
 function storeErr(e: unknown) {
   const kind = e instanceof StoreError ? e.kind : "internal_error";
   const status = e instanceof StoreError && e.kind === "not_found" ? 404 : 409;
-  return NextResponse.json({ ok: false, error: kind }, { status });
+  return NextResponse.json({ error: kind }, { status });
 }
 
 export async function POST(req: NextRequest) {
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     switch (capability) {
       case "support.list": {
         const tickets = await listTickets();
-        return NextResponse.json({ ok: true, result: tickets });
+        return NextResponse.json(tickets);
       }
 
       case "support.get": {
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
           return err("id is required");
         const ticket = await getTicket(params.id);
         if (!ticket) return err("Ticket not found", 404);
-        return NextResponse.json({ ok: true, result: ticket });
+        return NextResponse.json(ticket);
       }
 
       case "support.status": {
@@ -56,8 +56,6 @@ export async function POST(req: NextRequest) {
           criticalOpenCount(),
         ]);
         return NextResponse.json({
-          ok: true,
-          result: {
             instanceName: process.env.INSTANCE_NAME ?? "unknown",
             type: "support_tickets",
             ticketCount: total,
@@ -65,8 +63,7 @@ export async function POST(req: NextRequest) {
             criticalOpenCount: critical,
             health: "ok",
             timestamp: new Date().toISOString(),
-          },
-        });
+          });
       }
 
       case "support.update_status": {
@@ -82,7 +79,7 @@ export async function POST(req: NextRequest) {
             params.status as TicketStatus,
             resolution,
           );
-          return NextResponse.json({ ok: true, result: ticket });
+          return NextResponse.json(ticket);
         } catch (e) {
           return storeErr(e);
         }
@@ -95,7 +92,7 @@ export async function POST(req: NextRequest) {
           return err("severity is required");
         try {
           const ticket = await updateSeverity(params.id, params.severity as TicketSeverity);
-          return NextResponse.json({ ok: true, result: ticket });
+          return NextResponse.json(ticket);
         } catch (e) {
           return storeErr(e);
         }
@@ -108,7 +105,7 @@ export async function POST(req: NextRequest) {
           return err("assigned_to is required");
         try {
           const ticket = await assignTicket(params.id, params.assigned_to);
-          return NextResponse.json({ ok: true, result: ticket });
+          return NextResponse.json(ticket);
         } catch (e) {
           return storeErr(e);
         }
@@ -121,7 +118,7 @@ export async function POST(req: NextRequest) {
           return err("text is required");
         try {
           const ticket = await addDescription(params.id, params.text);
-          return NextResponse.json({ ok: true, result: ticket });
+          return NextResponse.json(ticket);
         } catch (e) {
           return storeErr(e);
         }
@@ -130,7 +127,7 @@ export async function POST(req: NextRequest) {
       case "support.create": {
         try {
           const ticket = await createTicket(params as unknown as NewTicketInput);
-          return NextResponse.json({ ok: true, result: ticket });
+          return NextResponse.json(ticket);
         } catch (e) {
           return storeErr(e);
         }
